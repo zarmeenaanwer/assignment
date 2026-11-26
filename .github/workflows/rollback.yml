@@ -1,0 +1,43 @@
+name: Rollback ECS deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_definition_revision:
+        description: "Previous ECS task definition revision (number only)"
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+  ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+  TASK_FAMILY: ${{ vars.TASK_FAMILY }}
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Validate revision input
+        run: |
+          [[ "${{ inputs.task_definition_revision }}" =~ ^[0-9]+$ ]] || {
+            echo "Revision must be a number."
+            exit 1
+          }
+
+      - name: Roll back ECS service
+        run: |
+          TASK_DEF="${TASK_FAMILY}:${{ inputs.task_definition_revision }}"
+          aws ecs describe-task-definition --task-definition "$TASK_DEF" >/dev/null
+          aws ecs update-service             --cluster "$ECS_CLUSTER"             --service "$ECS_SERVICE"             --task-definition "$TASK_DEF"
+          aws ecs wait services-stable             --cluster "$ECS_CLUSTER"             --services "$ECS_SERVICE"
